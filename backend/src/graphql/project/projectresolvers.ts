@@ -286,39 +286,63 @@ export const projectResolvers = {
   },
   // Get all projects for a workspace
 getProjectsByWorkspace: async ({ workspaceId }: { workspaceId: number }) => {
-  // console.log("workspaceId:", workspaceId);
+  try {
+    if (!workspaceId) throw new Error("workspaceId is required");
 
-  // Fetch projects for the workspace
-  const { rows: projects } = await pool.query(
-    "SELECT * FROM projects WHERE workspace_id=$1 ORDER BY created_at DESC",
-    [workspaceId]
-  );
-  // console.log("projects rows:", projects);
-
-  const projectsWithMembers = [];
-
-  for (const project of projects) {
-    const { rows: members } = await pool.query(
-      "SELECT user_id, role, joined_at FROM project_members WHERE project_id=$1",
-      [project.id]
+    // 1️⃣ Get projects
+    const { rows: projects } = await pool.query(
+      "SELECT * FROM projects WHERE workspace_id=$1 ORDER BY created_at DESC",
+      [workspaceId]
     );
 
-    projectsWithMembers.push({
-      id: project.id,
-      workspaceId: project.workspace_id,
-      name: project.name,
-      createdBy: project.created_by,
-      createdAt: project.created_at,
-      members: members.map((m: any) => ({
-        userId: m.user_id,
-        role: m.role,
-        joinedAt: m.joined_at,
-      })),
-    });
-  }
+    const projectsWithMembers = [];
 
-  return projectsWithMembers;
+    for (const project of projects) {
+      // 2️⃣ Get project members (just IDs + roles)
+      const { rows: memberRows } = await pool.query(
+        "SELECT user_id, role, joined_at FROM project_members WHERE project_id=$1",
+        [project.id]
+      );
+
+      // 3️⃣ Fetch member names from users table
+      const members = [];
+      for (const m of memberRows) {
+        const { rows: userRows } = await pool.query(
+          "SELECT name FROM users WHERE id=$1",
+          [m.user_id]
+        );
+        members.push({
+          userId: m.user_id,
+          name: userRows[0]?.name || `User ${m.user_id}`,
+          role: m.role,
+        });
+      }
+
+      // 4️⃣ Fetch project creator name
+      const { rows: creatorRows } = await pool.query(
+        "SELECT name FROM users WHERE id=$1",
+        [project.created_by]
+      );
+      const creatorName = creatorRows[0]?.name || `User ${project.created_by}`;
+
+      // 5️⃣ Return project info including creator in members list if you want
+      projectsWithMembers.push({
+        id: project.id,
+        name: project.name,
+        createdBy: project.created_by, // keep as ID
+        creatorName,                   // add this for easy access in frontend
+        members,
+      });
+    }
+
+    return projectsWithMembers;
+  } catch (err: any) {
+    console.error("Error in getProjectsByWorkspace:", err.stack || err);
+    throw new Error("Failed to fetch projects");
+  }
 }
+
+
 
 
 

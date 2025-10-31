@@ -35,12 +35,16 @@ const schema = buildSchema(`
     createdAt: String
     members: [ProjectMember!]!
   }
-
   type ProjectMember {
-    userId: ID!
-    role: String!
-    joinedAt: String
-  }
+  userId: ID!        # add this
+  name: String!      # add this
+  role: String!
+  joinedAt: String 
+}
+  
+
+
+ 
 
   type Task {
     id: ID!

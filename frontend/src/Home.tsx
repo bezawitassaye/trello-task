@@ -38,15 +38,20 @@ const Home = () => {
           query {
             getProjectsByWorkspace(workspaceId: ${selectedWorkspaceId}) {
               id
-              name
-              createdBy
-              createdAt
-              members { userId role joinedAt }
+    name
+    createdBy
+    members {
+      userId
+      name
+      role
+    }
             }
           }
         `;
         const prRes = await axios.post("http://localhost:4000/graphql", { query: projectsQuery });
         if (prRes.data.errors) throw new Error(prRes.data.errors[0].message);
+        console.log("Projects API response:", prRes.data.data.getProjectsByWorkspace);
+
         setProjects(prRes.data.data.getProjectsByWorkspace);
       } catch (err: any) {
         toast.error(err.message || "Failed to fetch workspace/projects");
@@ -216,21 +221,24 @@ const Home = () => {
             </div>
 
             {/* Projects */}
-            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-              {projects.map((project) => (
-                <div key={project.id} className="bg-gray-800 p-4 rounded-lg">
-                  <h2 className="font-semibold mb-2">{project.name}</h2>
-                  <p className="text-sm text-gray-400 mb-2">Created by User {project.createdBy}</p>
-                  <div className="flex flex-wrap gap-2">
-                    {project.members.map((m: any) => (
-                      <span key={m.userId} className="px-2 py-1 bg-gray-700 rounded text-xs">
-                        User {m.userId} ({m.role})
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-            </div>
+  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+  {projects.map((project) => (
+    <div key={project.id} className="bg-gray-800 p-4 rounded-lg">
+      <h2 className="font-semibold mb-2">{project.name}</h2>
+      <p className="text-sm text-gray-400 mb-2">
+        Created by {project.creatorName}
+      </p>
+      <div className="flex flex-wrap gap-2">
+        {project.members.map((m: any) => (
+          <span key={m.userId} className="px-2 py-1 bg-gray-700 rounded text-xs">
+            {m.name} ({m.role})
+          </span>
+        ))}
+      </div>
+    </div>
+  ))}
+</div>
+
           </>
         ) : (
           <p className="text-gray-400">Select a workspace from the sidebar</p>

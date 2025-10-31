@@ -1,281 +1,289 @@
+// src/graphql/project/projectResolvers.ts
 import { verifyToken } from "../../auth/jwt";
 import pool from "../../db";
-import { PubSub } from "graphql-subscriptions";
-import { sendTaskAssignedEmail,sendTaskUpdatedEmail } from "../../utils/emailService";
-import { logSecurity } from "../../utils/logger";
-const pubsub = new PubSub<TaskEvents>();
+import { logSecurity, logInfo } from "../../utils/logger";
 
-// -------------------
-// Types
-// -------------------
-type MyJwtPayload = { userId: number; email?: string; role?: string };
 
-interface CreateTaskArgs {
-  projectId: number;
-  title?: string;
-  description?: string;
-  assignedToIds: number[];
-  token: string;
-}
-
-interface UpdateTaskArgs {
-  taskId: number;
-  title?: string;
-  description?: string;
-  status?: string;
-  assignedToIds?: number[];
-  token: string;
-}
-
-interface MarkNotificationArgs {
-  notificationId: number;
-  token: string;
-}
-
-type TaskEvents = {
-  TASK_STATUS_UPDATED: { taskStatusUpdated: any };
+type MyJwtPayload = {
+  userId: number;
+  email?: string;
+  role?: string;
 };
 
-// -------------------
-// Gemini Helper Types & Constants
-// -------------------
-const MODEL = "gemini-2.5-flash";
-const API_URL = `https://generativelanguage.googleapis.com/v1/models/${MODEL}:generateContent`;
-
-interface GeminiResponse {
-  candidates?: {
-    content?: { parts?: { text?: string }[] };
-  }[];
+interface CreateProjectArgs {
+  workspaceId: number;
+  name: string;
+  token: string;
 }
 
-// -------------------
-// AI Helper Functions
-// -------------------
-export async function generateDescription(title: string): Promise<string> {
-  if (!process.env.GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY missing");
-
-  try {
-    const response = await fetch(`${API_URL}?key=${process.env.GOOGLE_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{
-          parts: [{
-            text: `You are a project manager. Write a detailed task description for the task titled: "${title}". Use 1-2 sentences.`
-          }]
-        }],
-        generationConfig: { temperature: 0.5, maxOutputTokens: 200 },
-      }),
-    });
-
-    if (!response.ok) throw new Error(await response.text());
-    const data = (await response.json()) as GeminiResponse;
-    return data.candidates?.[0]?.content?.parts?.[0]?.text?.trim() || "Description generation failed.";
-  } catch (err) {
-    console.error("generateDescription error:", err);
-    return "Description generation failed.";
-  }
+interface UpdateProjectArgs {
+  projectId: number;
+  name?: string;
+  token: string;
 }
 
-export async function generateTasksFromAI(promptText: string): Promise<{ title: string; description: string }[]> {
-  if (!process.env.GOOGLE_API_KEY) throw new Error("GOOGLE_API_KEY missing");
+interface DeleteProjectArgs {
+  projectId: number;
+  token: string;
+}
 
-  try {
-    const response = await fetch(`${API_URL}?key=${process.env.GOOGLE_API_KEY}`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: `You are a project manager. Generate 5-10 concise task titles for a project described as follows: "${promptText}". Output only task titles, one per line, no numbering or extra text.` }] }],
-        generationConfig: { temperature: 0.6, maxOutputTokens: 500 },
-      }),
-    });
+interface UpdateProjectMemberRoleArgs {
+  projectId: number;
+  userId: number;
+  newRole: string;
+  token: string;
+}
 
-    if (!response.ok) throw new Error(await response.text());
-    const data = (await response.json()) as GeminiResponse;
-    const textOutput = data.candidates?.[0]?.content?.parts?.[0]?.text || "";
-    console.log("AI raw output:", textOutput);
+interface RemoveProjectMemberArgs {
+  projectId: number;
+  userId: number;
+  token: string;
+}
 
-    const titles = textOutput
-      .split(/\r?\n/)
-      .map(line => line.replace(/^[\d•\-*]+\s*/, "").trim())
-      .filter(line => line.length > 0 && !/^(tasks|here are)/i.test(line));
+export const projectResolvers = {
+  // Create a project (creator becomes PROJECT_LEAD)
+   createProject: async ({ workspaceId, name, token }: CreateProjectArgs) => {
+    const decoded = verifyToken(token) as MyJwtPayload;
 
-    const results = [];
-    for (const title of titles) {
-      const description = await generateDescription(title);
-      results.push({ title, description });
+    // 1️⃣ Ensure user is part of workspace
+    const { rows: wm } = await pool.query(
+      "SELECT * FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+      [workspaceId, decoded.userId]
+    );
+    if (!wm.length) {
+      await logSecurity(decoded.userId, null, "CREATE_PROJECT_FAILED", { workspaceId, reason: "Not a workspace member" });
+      throw new Error("Not a workspace member");
     }
 
-    return results;
-  } catch (err) {
-    console.error("generateTasksFromAI error:", err);
-    // Fallback: return hardcoded tasks to prevent empty array
-    return [
-      { title: "Update landing page layout", description: "Implement a new grid system for the landing page." },
-      { title: "Add hero image", description: "Add a responsive hero image with proper alt text." },
-    ];
-  }
-}
+    // 2️⃣ Insert project record
+    const { rows: pRows } = await pool.query(
+      `INSERT INTO projects (name, workspace_id, created_by, created_at)
+       VALUES ($1, $2, $3, NOW()) RETURNING *`,
+      [name, workspaceId, decoded.userId]
+    );
+    const project = pRows[0];
 
-// -------------------
-// Task Resolvers
-// -------------------
-export const taskResolvers = {
-  createTask: async ({ projectId, title, description, assignedToIds, token }: CreateTaskArgs) => {
-    try {
-      const decoded = verifyToken(token) as MyJwtPayload;
+    // 3️⃣ Add creator as Project Lead
+    await pool.query(
+      `INSERT INTO project_members (project_id, user_id, role, joined_at)
+       VALUES ($1, $2, 'PROJECT_LEAD', NOW())`,
+      [project.id, decoded.userId]
+    );
 
-      const { rows: member } = await pool.query(
-        "SELECT * FROM project_members WHERE project_id=$1 AND user_id=$2",
-        [projectId, decoded.userId]
-      );
-      if (!member.length) throw new Error("Not a project member");
+    // 4️⃣ Add all workspace members as contributors
+    const { rows: workspaceMembers } = await pool.query(
+      `SELECT user_id FROM workspace_members WHERE workspace_id = $1`,
+      [workspaceId]
+    );
 
-      const { rows: task } = await pool.query(
-        `INSERT INTO tasks (project_id, title, description, status)
-         VALUES ($1, $2, $3, 'PENDING') RETURNING *`,
-        [projectId, title, description || null]
-      );
-
-      for (const userId of assignedToIds) {
+    for (const member of workspaceMembers) {
+      if (member.user_id !== decoded.userId) {
         await pool.query(
-          `INSERT INTO task_assignments (task_id, user_id)
-           VALUES ($1, $2)
-           ON CONFLICT DO NOTHING`,
-          [task[0].id, userId]
+          `INSERT INTO project_members (project_id, user_id, role, joined_at)
+           VALUES ($1, $2, 'CONTRIBUTOR', NOW())`,
+          [project.id, member.user_id]
         );
       }
-
-      return { ...task[0], assignedToIds };
-    } catch (error: unknown) {
-      const e = error as Error;
-      console.error("createTask error:", e.message);
-      throw new Error(e.message);
     }
+
+    // 5️⃣ Log project creation
+    await logSecurity(decoded.userId, null, "PROJECT_CREATED", { projectId: project.id, workspaceId });
+
+    // 6️⃣ Return GraphQL-friendly response
+    return {
+      id: project.id,
+      workspaceId: project.workspace_id,
+      name: project.name,
+      createdBy: project.created_by,
+      createdAt: project.created_at,
+      members: [
+        {
+          userId: decoded.userId,
+          role: "PROJECT_LEAD",
+          joinedAt: new Date().toISOString(),
+        },
+        ...workspaceMembers
+          .filter((m) => m.user_id !== decoded.userId)
+          .map((m) => ({
+            userId: m.user_id,
+            role: "CONTRIBUTOR",
+            joinedAt: new Date().toISOString(),
+          })),
+      ],
+    };
   },
 
-  updateTask: async ({ taskId, title, description, status, assignedToIds, token }: UpdateTaskArgs) => {
+  updateProject: async ({ projectId, name, token }: UpdateProjectArgs) => {
     const decoded = verifyToken(token) as MyJwtPayload;
 
-    const { rows: member } = await pool.query(
-      `SELECT tm.* FROM task_assignments ta
-       JOIN project_members tm ON tm.user_id = ta.user_id
-       WHERE ta.task_id=$1 AND tm.user_id=$2`,
-      [taskId, decoded.userId]
-    );
-    if (!member.length) {
-      await logSecurity(decoded.userId, null, "UPDATE_TASK_FAILED", { taskId, reason: "Unauthorized" });
-      throw new Error("Unauthorized: not assigned to this task");
+    const { rows: projectRows } = await pool.query("SELECT * FROM projects WHERE id=$1", [projectId]);
+    if (!projectRows.length) {
+      await logSecurity(decoded.userId, null, "UPDATE_PROJECT_FAILED", { projectId, reason: "Project not found" });
+      throw new Error("Project not found");
     }
+    const project = projectRows[0];
 
-    const { rows: updatedTask } = await pool.query(
-      `UPDATE tasks
-       SET title = COALESCE($1, title),
-           description = COALESCE($2, description),
-           status = COALESCE($3, status)
-       WHERE id=$4
-       RETURNING *`,
-      [title, description, status, taskId]
+    // Check workspace owner
+    const { rows: ownerRows } = await pool.query(
+      "SELECT * FROM workspace_members WHERE workspace_id=$1 AND user_id=$2 AND role='OWNER'",
+      [project.workspace_id, decoded.userId]
     );
 
-    const { rows: project } = await pool.query(
-      `SELECT p.name FROM projects p
-       JOIN tasks t ON t.project_id = p.id
-       WHERE t.id=$1`,
-      [taskId]
-    );
-    const projectName = project[0]?.name || "Unknown Project";
-
-    if (assignedToIds && assignedToIds.length) {
-      await pool.query("DELETE FROM task_assignments WHERE task_id=$1", [taskId]);
-      for (const userId of assignedToIds) {
-        await pool.query(`INSERT INTO task_assignments (task_id, user_id) VALUES ($1, $2)`, [taskId, userId]);
-
-        await pool.query(
-          `INSERT INTO notifications (title, body, recipient_id, status, related_entity_id, created_at)
-           VALUES ($1, $2, $3, 'UNSEEN', $4, NOW())`,
-          ["Task Updated", `Task '${updatedTask[0].title}' has been updated.`, userId, taskId]
-        );
-
-        const { rows: user } = await pool.query("SELECT email FROM users WHERE id=$1", [userId]);
-        if (user.length && user[0].email) {
-          await sendTaskUpdatedEmail(user[0].email, updatedTask[0].title, projectName, status);
-        }
-      }
-    }
-
-    await logSecurity(decoded.userId, null, "TASK_UPDATED", { taskId, updatedFields: { title, description, status }, assignedToIds });
-
-    pubsub.publish("TASK_STATUS_UPDATED", {
-      taskStatusUpdated: { ...updatedTask[0], assignedToIds },
-    });
-
-    return { ...updatedTask[0], assignedToIds };
-  },
-
-  markNotificationAsSeen: async ({ notificationId, token }: MarkNotificationArgs) => {
-    const decoded = verifyToken(token) as MyJwtPayload;
-
-    const { rows: notification } = await pool.query(
-      `UPDATE notifications
-       SET status='SEEN'
-       WHERE id=$1 AND recipient_id=$2
-       RETURNING *`,
-      [notificationId, decoded.userId]
-    );
-
-    if (!notification.length) {
-      await logSecurity(decoded.userId, null, "MARK_NOTIFICATION_FAILED", { notificationId, reason: "Not found or unauthorized" });
-      throw new Error("Notification not found or unauthorized");
-    }
-
-    await logSecurity(decoded.userId, null, "NOTIFICATION_MARKED_SEEN", { notificationId });
-
-    return notification[0];
-  },
-
-  summarizeTask: async ({ taskId }: { taskId: number }) => {
-    const { rows } = await pool.query("SELECT description FROM tasks WHERE id=$1", [taskId]);
-    if (!rows.length) throw new Error("Task not found");
-    const description = rows[0].description;
-    if (!description) return "No description available";
-    return description; // no longer using summarizeText here
-  },
-
-  generateTasksFromPrompt: async ({ projectId, prompt, token }: { projectId: number; prompt: string; token: string }) => {
-    const decoded = verifyToken(token) as MyJwtPayload;
-
-    const { rows: member } = await pool.query(
+    const { rows: projMemberRows } = await pool.query(
       "SELECT * FROM project_members WHERE project_id=$1 AND user_id=$2",
       [projectId, decoded.userId]
     );
-    if (!member.length) throw new Error("Not a project member");
 
-    const tasks = await generateTasksFromAI(prompt); // returns {title, description}[]
-
-    const results = [];
-    for (const { title, description } of tasks) {
-      const { rows: created } = await pool.query(
-        "INSERT INTO tasks (project_id, title, description, status) VALUES ($1, $2, $3, 'TODO') RETURNING *",
-        [projectId, title, description]
-      );
-      results.push(created[0]);
+    const isOwner = !!ownerRows.length;
+    const isProjectLead = !!projMemberRows.length && projMemberRows[0].role === "PROJECT_LEAD";
+    if (!isOwner && !isProjectLead) {
+      await logSecurity(decoded.userId, null, "UPDATE_PROJECT_FAILED", { projectId, reason: "Unauthorized" });
+      throw new Error("Unauthorized: must be workspace owner or project lead");
     }
 
-    return results;
+    const { rows: updatedRows } = await pool.query(
+      `UPDATE projects SET name = COALESCE($1, name) WHERE id = $2 RETURNING *`,
+      [name, projectId]
+    );
+    const updated = updatedRows[0];
+
+    await logSecurity(decoded.userId, null, "PROJECT_UPDATED", { projectId: updated.id, newName: name });
+
+    const { rows: members } = await pool.query(
+      "SELECT user_id, role, joined_at FROM project_members WHERE project_id=$1",
+      [projectId]
+    );
+
+    return {
+      id: updated.id,
+      workspaceId: updated.workspace_id,
+      name: updated.name,
+      createdBy: updated.created_by,
+      createdAt: updated.created_at,
+      members: members.map((m: any) => ({
+        userId: m.user_id,
+        role: m.role,
+        joinedAt: m.joined_at,
+      })),
+    };
+  },
+
+  deleteProject: async ({ projectId, token }: DeleteProjectArgs) => {
+    const decoded = verifyToken(token) as MyJwtPayload;
+
+    const { rows: projectRows } = await pool.query("SELECT * FROM projects WHERE id=$1", [projectId]);
+    if (!projectRows.length) {
+      await logSecurity(decoded.userId, null, "DELETE_PROJECT_FAILED", { projectId, reason: "Project not found" });
+      throw new Error("Project not found");
+    }
+    const project = projectRows[0];
+
+    const { rows: ownerRows } = await pool.query(
+      "SELECT * FROM workspace_members WHERE workspace_id=$1 AND user_id=$2 AND role='OWNER'",
+      [project.workspace_id, decoded.userId]
+    );
+
+    const { rows: leadRows } = await pool.query(
+      "SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2",
+      [projectId, decoded.userId]
+    );
+
+    const isOwner = !!ownerRows.length;
+    const isLead = !!leadRows.length && leadRows[0].role === "PROJECT_LEAD";
+    if (!isOwner && !isLead) {
+      await logSecurity(decoded.userId, null, "DELETE_PROJECT_FAILED", { projectId, reason: "Unauthorized" });
+      throw new Error("Unauthorized: must be workspace owner or project lead");
+    }
+
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      await client.query("DELETE FROM task_assignments WHERE task_id IN (SELECT id FROM tasks WHERE project_id=$1)", [projectId]);
+      await client.query("DELETE FROM notifications WHERE related_entity_id IN (SELECT id FROM tasks WHERE project_id=$1)", [projectId]);
+      await client.query("DELETE FROM tasks WHERE project_id=$1", [projectId]);
+      await client.query("DELETE FROM project_members WHERE project_id=$1", [projectId]);
+      await client.query("DELETE FROM projects WHERE id=$1", [projectId]);
+      await client.query("COMMIT");
+
+      await logSecurity(decoded.userId, null, "PROJECT_DELETED", { projectId });
+    } catch (err) {
+      await client.query("ROLLBACK");
+      await logSecurity(decoded.userId, null, "DELETE_PROJECT_ERROR", { projectId, error: err });
+      throw err;
+    } finally {
+      client.release();
+    }
+
+    return { success: true, message: `Project ${projectId} deleted` };
+  },
+
+  
+
+
+  // Update project member role (PROJECT_LEAD can change roles)
+  updateProjectMemberRole: async (
+    _: any,
+    { projectId, userId, newRole, token }: UpdateProjectMemberRoleArgs
+  ) => {
+    const decoded = verifyToken(token) as MyJwtPayload;
+
+    // verify requester is PROJECT_LEAD
+    const { rows: requesterRows } = await pool.query(
+      "SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2",
+      [projectId, decoded.userId]
+    );
+    if (!requesterRows.length || requesterRows[0].role !== "PROJECT_LEAD") {
+      throw new Error("Unauthorized: only project leads can change roles");
+    }
+
+    // validate newRole (optional): ensure matches your enum values
+    const allowed = ["PROJECT_LEAD", "CONTRIBUTOR", "PROJECT_VIEWER"];
+    if (!allowed.includes(newRole)) throw new Error("Invalid role");
+
+    const { rows } = await pool.query(
+      "UPDATE project_members SET role=$1 WHERE project_id=$2 AND user_id=$3 RETURNING *",
+      [newRole, projectId, userId]
+    );
+
+    if (!rows.length) throw new Error("Member not found");
+
+    return {
+      projectId,
+      userId,
+      newRole: rows[0].role,
+    };
+  },
+
+  // Remove a project member
+  removeProjectMember: async (
+    _: any,
+    { projectId, userId, token }: RemoveProjectMemberArgs
+  ) => {
+    const decoded = verifyToken(token) as MyJwtPayload;
+
+    // verify requester is PROJECT_LEAD
+    const { rows: requesterRows } = await pool.query(
+      "SELECT role FROM project_members WHERE project_id=$1 AND user_id=$2",
+      [projectId, decoded.userId]
+    );
+    if (!requesterRows.length || requesterRows[0].role !== "PROJECT_LEAD") {
+      throw new Error("Unauthorized: only project leads can remove members");
+    }
+
+    // prevent removing self (optional)
+    if (decoded.userId === userId) throw new Error("Project leads cannot remove themselves");
+
+    // delete membership
+    await pool.query("DELETE FROM project_members WHERE project_id=$1 AND user_id=$2", [projectId, userId]);
+
+    // optional: also remove task assignments for that user in this project
+    await pool.query(
+      `DELETE FROM task_assignments WHERE task_id IN (SELECT id FROM tasks WHERE project_id=$1) AND user_id=$2`,
+      [projectId, userId]
+    );
+
+    return { success: true, message: `User ${userId} removed from project ${projectId}` };
   },
 };
 
-// -------------------
-// Subscriptions
-// -------------------
-export const taskSubscriptions = {
-  taskStatusUpdated: {
-    subscribe: () => (pubsub as any).asyncIterator(["TASK_STATUS_UPDATED"]),
-  },
-};
-
-// -------------------
-// Default export
-// -------------------
-export default { ...taskResolvers, ...taskSubscriptions };
+export default projectResolvers;

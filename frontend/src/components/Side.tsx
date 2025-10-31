@@ -1,5 +1,5 @@
 import { useState, useEffect } from "react";
-import { FolderIcon, PlusCircleIcon } from "@heroicons/react/24/outline";
+import { FolderIcon, PlusCircleIcon, UserCircleIcon } from "@heroicons/react/24/outline";
 import axios from "axios";
 import { toast } from "react-toastify";
 
@@ -35,21 +35,20 @@ const useWorkspaces = () => {
 
       try {
         const query = `
-      query GetUserWorkspaces($token: String!) {
-        getUserWorkspaces(token: $token) {
-          id
-          name
-          createdBy
-          createdAt
-          members {
-            userId
-            role
-            joinedAt
+          query GetUserWorkspaces($token: String!) {
+            getUserWorkspaces(token: $token) {
+              id
+              name
+              createdBy
+              createdAt
+              members {
+                userId
+                role
+                joinedAt
+              }
+            }
           }
-        }
-      }
-    `;;
-
+        `;
         const variables = { token };
         const res = await axios.post(
           "http://localhost:4000/graphql",
@@ -58,7 +57,6 @@ const useWorkspaces = () => {
         );
 
         if (res.data.errors) throw new Error(res.data.errors[0].message);
-
         setWorkspaces(res.data.data.getUserWorkspaces);
       } catch (err: any) {
         setError(err.message || "Failed to fetch workspaces");
@@ -73,6 +71,7 @@ const useWorkspaces = () => {
   return { workspaces, setWorkspaces, loading, error };
 };
 
+// ------------------- Sidebar Component -------------------
 interface SidebarProps {
   onSelectWorkspace: (workspaceId: number) => void;
 }
@@ -81,7 +80,38 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
   const { workspaces, setWorkspaces, loading, error } = useWorkspaces();
   const [showModal, setShowModal] = useState(false);
   const [workspaceName, setWorkspaceName] = useState("");
+  const [userName, setUserName] = useState("");
+  const [showLogoutMenu, setShowLogoutMenu] = useState(false);
 
+  // Fetch logged-in user info
+  useEffect(() => {
+    const fetchUser = async () => {
+      const token = localStorage.getItem("token");
+      if (!token) return;
+      try {
+        const query = `
+          query {
+            getUserProfile(token: "${token}") {
+              id
+              name
+              email
+            }
+          }
+        `;
+        const res = await axios.post("http://localhost:4000/graphql", { query }, {
+          headers: { "Content-Type": "application/json" }
+        });
+        if (res.data.errors) throw new Error(res.data.errors[0].message);
+        const user = res.data.data.getUserProfile;
+        setUserName(user.name.split(" ")[0]); // first name only
+      } catch {
+        setUserName("User");
+      }
+    };
+    fetchUser();
+  }, []);
+
+  // ------------------- Create Workspace -------------------
   const createWorkspace = async () => {
     if (!workspaceName.trim()) return toast.error("Workspace name required");
     const token = localStorage.getItem("token");
@@ -114,9 +144,27 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
     }
   };
 
+  // ------------------- Logout -------------------
+  const handleLogout = async () => {
+    const refreshToken = localStorage.getItem("refreshToken");
+    console.log(refreshToken)
+    try {
+      await axios.post("http://localhost:4000/api/auth/logout", { refreshToken });
+      localStorage.removeItem("token");
+      localStorage.removeItem("refreshToken");
+      toast.success("Logged out successfully");
+      window.location.href = "/";
+    } catch (err: any) {
+      toast.error("Failed to logout");
+    }
+  };
+
   return (
     <aside className="w-64 bg-[#0f172a] border-r border-gray-800 flex flex-col">
-      <div className="p-4 font-semibold text-lg">Workspace</div>
+      {/* Title */}
+      <div className="p-4 font-semibold text-lg text-gray-100">Workspace</div>
+
+      {/* Workspaces List */}
       <div className="flex-1 overflow-y-auto px-3">
         {loading && <p className="text-gray-400">Loading...</p>}
         {error && <p className="text-red-500">{error}</p>}
@@ -127,11 +175,12 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
             className="flex items-center gap-2 px-3 py-2 hover:bg-gray-800 rounded-lg cursor-pointer"
           >
             <FolderIcon className="w-5 h-5 text-gray-400" />
-            <span className="truncate">{w.name}</span>
+            <span className="truncate text-gray-200">{w.name}</span>
           </div>
         ))}
       </div>
 
+      {/* Create Workspace Button */}
       <button
         onClick={() => setShowModal(true)}
         className="m-4 bg-indigo-600 py-2 rounded-lg text-sm hover:bg-indigo-500 flex items-center justify-center gap-1"
@@ -139,6 +188,28 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
         <PlusCircleIcon className="w-5 h-5" /> New Workspace
       </button>
 
+      {/* User Profile + Logout */}
+      <div className="relative border-t border-gray-800 p-4 flex items-center justify-between">
+        <div className="text-gray-300 text-sm">{userName}</div>
+        <div className="relative">
+          <UserCircleIcon
+            className="w-8 h-8 text-gray-300 cursor-pointer hover:text-white"
+            onClick={() => setShowLogoutMenu(!showLogoutMenu)}
+          />
+          {showLogoutMenu && (
+            <div className="absolute right-0 bottom-10 bg-gray-800 rounded-md shadow-lg w-32 py-2">
+              <button
+                onClick={handleLogout}
+                className="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700"
+              >
+                Logout
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* Modal for Workspace Creation */}
       {showModal && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
           <div className="bg-gray-900 p-6 rounded-lg w-80">
@@ -170,4 +241,5 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
     </aside>
   );
 };
+
 export default Sidebar;

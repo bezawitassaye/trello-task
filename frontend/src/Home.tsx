@@ -7,6 +7,8 @@ const Home = () => {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<number | null>(null);
   const [workspace, setWorkspace] = useState<any>(null);
   const [projects, setProjects] = useState<any[]>([]);
+  const [selectedProjectId, setSelectedProjectId] = useState<number | null>(null);
+  const [tasks, setTasks] = useState<any[]>([]);
 
   // Fetch workspace and projects when selected
   useEffect(() => {
@@ -38,19 +40,18 @@ const Home = () => {
           query {
             getProjectsByWorkspace(workspaceId: ${selectedWorkspaceId}) {
               id
-    name
-    createdBy
-    members {
-      userId
-      name
-      role
-    }
+              name
+              createdBy
+              members {
+                userId
+                name
+                role
+              }
             }
           }
         `;
         const prRes = await axios.post("http://localhost:4000/graphql", { query: projectsQuery });
         if (prRes.data.errors) throw new Error(prRes.data.errors[0].message);
-        console.log("Projects API response:", prRes.data.data.getProjectsByWorkspace);
 
         setProjects(prRes.data.data.getProjectsByWorkspace);
       } catch (err: any) {
@@ -60,6 +61,36 @@ const Home = () => {
 
     fetchWorkspaceAndProjects();
   }, [selectedWorkspaceId]);
+
+  // Fetch tasks for selected project
+  useEffect(() => {
+    if (!selectedProjectId) return;
+    const token = localStorage.getItem("token");
+    if (!token) return;
+
+    const fetchTasks = async () => {
+      const query = `
+        query {
+          getTasksByProject(projectId: ${selectedProjectId}) {
+            id
+            title
+            description
+            status
+            assignedToIds
+          }
+        }
+      `;
+      try {
+        const res = await axios.post("http://localhost:4000/graphql", { query });
+        if (res.data.errors) throw new Error(res.data.errors[0].message);
+        setTasks(res.data.data.getTasksByProject);
+      } catch (err: any) {
+        toast.error(err.message || "Failed to fetch tasks");
+      }
+    };
+
+    fetchTasks();
+  }, [selectedProjectId]);
 
   // Invite a member
   const inviteMember = async (email: string) => {
@@ -164,6 +195,43 @@ const Home = () => {
     }
   };
 
+  // Create task
+  const createTask = async () => {
+    if (!selectedProjectId || !workspace) return;
+    const title = prompt("Enter task title");
+    if (!title) return;
+    const description = prompt("Enter task description") || "";
+    const assignedToIds = workspace.members.map((m: any) => m.userId);
+    const token = localStorage.getItem("token");
+    if (!token) return toast.error("Token not found");
+
+    const mutation = `
+      mutation {
+        createTask(
+          projectId: ${selectedProjectId},
+          title: "${title}",
+          description: "${description}",
+          assignedToIds: [${assignedToIds.join(",")}],
+          token: "${token}"
+        ) {
+          id
+          title
+          description
+          status
+          assignedToIds
+        }
+      }
+    `;
+    try {
+      const res = await axios.post("http://localhost:4000/graphql", { query: mutation });
+      if (res.data.errors) throw new Error(res.data.errors[0].message);
+      setTasks(prev => [...prev, res.data.data.createTask]);
+      toast.success("Task created!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create task");
+    }
+  };
+
   return (
     <div className="flex h-screen bg-[#111827] text-gray-200">
       <Sidebar onSelectWorkspace={setSelectedWorkspaceId} />
@@ -221,24 +289,51 @@ const Home = () => {
             </div>
 
             {/* Projects */}
-  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-  {projects.map((project) => (
-    <div key={project.id} className="bg-gray-800 p-4 rounded-lg">
-      <h2 className="font-semibold mb-2">{project.name}</h2>
-      <p className="text-sm text-gray-400 mb-2">
-        Created by {project.creatorName}
-      </p>
-      <div className="flex flex-wrap gap-2">
-        {project.members.map((m: any) => (
-          <span key={m.userId} className="px-2 py-1 bg-gray-700 rounded text-xs">
-            {m.name} ({m.role})
-          </span>
-        ))}
-      </div>
-    </div>
-  ))}
-</div>
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {projects.map((project) => (
+                <div key={project.id} className="bg-gray-800 p-4 rounded-lg">
+                  <h2 className="font-semibold mb-2">{project.name}</h2>
+                  <p className="text-sm text-gray-400 mb-2">
+                    Created by {project.creatorName || `User ${project.createdBy}`}
+                  </p>
+                  <div className="flex flex-wrap gap-2 mb-2">
+                    {project.members.map((m: any) => (
+                      <span key={m.userId} className="px-2 py-1 bg-gray-700 rounded text-xs">
+                        {m.name || `User ${m.userId}`} ({m.role})
+                      </span>
+                    ))}
+                  </div>
 
+                  {/* Task section */}
+                  <button
+                    className="bg-green-600 px-3 py-1 rounded text-sm mb-2"
+                    onClick={() => setSelectedProjectId(project.id)}
+                  >
+                    View Tasks
+                  </button>
+
+                  {selectedProjectId === project.id && (
+                    <div className="mt-2 p-2 bg-gray-900 rounded">
+                      <button
+                        className="bg-blue-500 px-2 py-1 rounded text-xs mb-2"
+                        onClick={createTask}
+                      >
+                        + Add Task
+                      </button>
+                      {tasks.map((task) => (
+                        <div key={task.id} className="p-2 bg-gray-800 mb-1 rounded text-sm">
+                          <p><strong>{task.title}</strong> ({task.status})</p>
+                          <p className="text-gray-400 text-xs">{task.description}</p>
+                          <p className="text-gray-400 text-xs">
+                            Assigned to: {task.assignedToIds.map((id: number) => `User ${id}`).join(", ")}
+                          </p>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              ))}
+            </div>
           </>
         ) : (
           <p className="text-gray-400">Select a workspace from the sidebar</p>

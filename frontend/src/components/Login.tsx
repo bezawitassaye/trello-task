@@ -20,8 +20,9 @@ const Login = () => {
 
       if (res.status !== 200) throw new Error(res.data.message || "Login failed");
 
-      const { accessToken } = res.data;
-      localStorage.setItem("token", accessToken); // store token
+      const { accessToken,refreshToken } = res.data;
+      localStorage.setItem("token", accessToken,);
+      localStorage.setItem("refreshToken",refreshToken); 
 
       toast.success("Login successful! Redirecting...");
       setTimeout(() => navigate("/home"), 1500);

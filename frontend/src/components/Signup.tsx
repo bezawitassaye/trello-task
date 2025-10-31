@@ -39,8 +39,9 @@ const Signup = () => {
 
       if (res.data.errors) throw new Error(res.data.errors[0].message);
 
-      const { token } = res.data.data.signup;
-      localStorage.setItem("token", token); // store token
+      const { token,refreshToken } = res.data.data.signup;
+      localStorage.setItem("token", token); 
+      localStorage.setItem("refreshToken",refreshToken); 
 
       toast.success("Signup successful! Redirecting...");
       navigate("/home"); // redirect to dashboard

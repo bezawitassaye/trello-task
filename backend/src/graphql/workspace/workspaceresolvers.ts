@@ -1,9 +1,9 @@
 import pool from "../../db";
 import { getUserIdFromToken, verifyToken } from "../../auth/jwt"; // or helper
 import { ensureOwner, ensureAtLeastViewer } from "../../auth/roles";
-import { sendAddedMemberEmail, sendInvitationEmail } from "../../utils/emailService";
-import { logInfo, logSecurity } from "../../utils/logger";
-
+import { sendAddedMemberEmail,sendInvitationEmail } from "../../utils/emailService";
+import { logInfo,logSecurity } from "../../utils/logger";
+import { requireAdmin } from "../../middleware/requireAdmin";
 /**
  * createWorkspace: creator becomes OWNER
  */
@@ -184,7 +184,7 @@ export const workspaceResolvers = {
 
   getAllWorkspaces: async ({ adminToken }: any) => {
     // reuse your requireAdmin middleware (or isAdmin)
-    const { requireAdmin } = await import('../../middleware/requireAdmin'); // or import top-level
+  
     await requireAdmin(adminToken);
 
     const wsRes = await pool.query('SELECT id, name, created_by, created_at FROM workspaces ORDER BY id ASC');

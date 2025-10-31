@@ -3,7 +3,8 @@ import express from "express";
 import bcrypt from "bcrypt";
 import pool from "../db";
 import { generateToken, verifyToken } from "../auth/jwt";
-import { logInfo, logSecurity } from "../utils/logger"; // ✅ import your logger
+
+import { logInfo,logSecurity } from "../utils/logger";
 import { authLimiter } from "../middleware/rateLimiter";
 
 const router = express.Router();

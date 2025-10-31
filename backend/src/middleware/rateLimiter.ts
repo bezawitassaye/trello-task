@@ -1,6 +1,7 @@
 import rateLimit from "express-rate-limit";
+
 import { logSecurity } from "../utils/logger";
-// src/middleware/rateLimiter.ts
+
 const signupAttempts: Record<string, { count: number; lastAttempt: number }> = {};
 const WINDOW_MS = 60 * 1000; // 1 minute
 const MAX_ATTEMPTS = 5;

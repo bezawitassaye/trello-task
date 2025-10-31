@@ -1,9 +1,8 @@
 import { verifyToken } from "../../auth/jwt";
 import pool from "../../db";
 import { PubSub } from "graphql-subscriptions";
-import { sendTaskAssignedEmail, sendTaskUpdatedEmail } from "../../utils/emailService";
+import { sendTaskAssignedEmail,sendTaskUpdatedEmail } from "../../utils/emailService";
 import { logSecurity } from "../../utils/logger";
-
 const pubsub = new PubSub<TaskEvents>();
 
 // -------------------

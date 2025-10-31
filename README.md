@@ -5,7 +5,7 @@ run cd backend
 
 run ### bun install
 
-
+run bun run src/server.ts
  USER 
 
 #goto http://localhost:4000/graphql  

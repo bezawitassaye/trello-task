@@ -42,76 +42,90 @@ interface RemoveProjectMemberArgs {
 
 export const projectResolvers = {
   // Create a project (creator becomes PROJECT_LEAD)
-   createProject: async ({ workspaceId, name, token }: CreateProjectArgs) => {
-    const decoded = verifyToken(token) as MyJwtPayload;
+  createProject: async ({ workspaceId, name, token }: CreateProjectArgs) => {
+  const decoded = verifyToken(token) as MyJwtPayload;
 
-    // 1️⃣ Ensure user is part of workspace
-    const { rows: wm } = await pool.query(
-      "SELECT * FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
-      [workspaceId, decoded.userId]
-    );
-    if (!wm.length) {
-      await logSecurity(decoded.userId, null, "CREATE_PROJECT_FAILED", { workspaceId, reason: "Not a workspace member" });
-      throw new Error("Not a workspace member");
+  // 1️⃣ Ensure user is part of workspace
+  const { rows: wm } = await pool.query(
+    "SELECT * FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+    [workspaceId, decoded.userId]
+  );
+  if (!wm.length) {
+    await logSecurity(decoded.userId, null, "CREATE_PROJECT_FAILED", {
+      workspaceId,
+      reason: "Not a workspace member",
+    });
+    throw new Error("Not a workspace member");
+  }
+
+  // 2️⃣ Insert project record
+  const { rows: pRows } = await pool.query(
+    `INSERT INTO projects (name, workspace_id, created_by, created_at)
+     VALUES ($1, $2, $3, NOW()) RETURNING *`,
+    [name, workspaceId, decoded.userId]
+  );
+  const project = pRows[0];
+
+  // 3️⃣ Add creator as Project Lead
+  await pool.query(
+    `INSERT INTO project_members (project_id, user_id, role, joined_at)
+     VALUES ($1, $2, 'PROJECT_LEAD', NOW())`,
+    [project.id, decoded.userId]
+  );
+
+  // 4️⃣ Add all workspace members as contributors
+  const { rows: workspaceMembers } = await pool.query(
+    `SELECT user_id FROM workspace_members WHERE workspace_id = $1`,
+    [workspaceId]
+  );
+
+  for (const member of workspaceMembers) {
+    if (member.user_id !== decoded.userId) {
+      await pool.query(
+        `INSERT INTO project_members (project_id, user_id, role, joined_at)
+         VALUES ($1, $2, 'CONTRIBUTOR', NOW())`,
+        [project.id, member.user_id]
+      );
     }
+  }
 
-    // 2️⃣ Insert project record
-    const { rows: pRows } = await pool.query(
-      `INSERT INTO projects (name, workspace_id, created_by, created_at)
-       VALUES ($1, $2, $3, NOW()) RETURNING *`,
-      [name, workspaceId, decoded.userId]
+  // 5️⃣ Log project creation
+  await logSecurity(decoded.userId, null, "PROJECT_CREATED", {
+    projectId: project.id,
+    workspaceId,
+  });
+
+  // 6️⃣ Fetch member names and return full project info
+  const memberDetails = [];
+
+  for (const m of [
+    { userId: decoded.userId, role: "PROJECT_LEAD" },
+    ...workspaceMembers
+      .filter((mem) => mem.user_id !== decoded.userId)
+      .map((mem) => ({ userId: mem.user_id, role: "CONTRIBUTOR" })),
+  ]) {
+    const { rows: userRows } = await pool.query(
+      "SELECT name FROM users WHERE id=$1",
+      [m.userId]
     );
-    const project = pRows[0];
+    memberDetails.push({
+      userId: m.userId,
+      name: userRows[0]?.name || `User ${m.userId}`,
+      role: m.role,
+      joinedAt: new Date().toISOString(),
+    });
+  }
 
-    // 3️⃣ Add creator as Project Lead
-    await pool.query(
-      `INSERT INTO project_members (project_id, user_id, role, joined_at)
-       VALUES ($1, $2, 'PROJECT_LEAD', NOW())`,
-      [project.id, decoded.userId]
-    );
+  return {
+    id: project.id,
+    workspaceId: project.workspace_id,
+    name: project.name,
+    createdBy: project.created_by,
+    createdAt: project.created_at,
+    members: memberDetails,
+  };
+},
 
-    // 4️⃣ Add all workspace members as contributors
-    const { rows: workspaceMembers } = await pool.query(
-      `SELECT user_id FROM workspace_members WHERE workspace_id = $1`,
-      [workspaceId]
-    );
-
-    for (const member of workspaceMembers) {
-      if (member.user_id !== decoded.userId) {
-        await pool.query(
-          `INSERT INTO project_members (project_id, user_id, role, joined_at)
-           VALUES ($1, $2, 'CONTRIBUTOR', NOW())`,
-          [project.id, member.user_id]
-        );
-      }
-    }
-
-    // 5️⃣ Log project creation
-    await logSecurity(decoded.userId, null, "PROJECT_CREATED", { projectId: project.id, workspaceId });
-
-    // 6️⃣ Return GraphQL-friendly response
-    return {
-      id: project.id,
-      workspaceId: project.workspace_id,
-      name: project.name,
-      createdBy: project.created_by,
-      createdAt: project.created_at,
-      members: [
-        {
-          userId: decoded.userId,
-          role: "PROJECT_LEAD",
-          joinedAt: new Date().toISOString(),
-        },
-        ...workspaceMembers
-          .filter((m) => m.user_id !== decoded.userId)
-          .map((m) => ({
-            userId: m.user_id,
-            role: "CONTRIBUTOR",
-            joinedAt: new Date().toISOString(),
-          })),
-      ],
-    };
-  },
 
   updateProject: async ({ projectId, name, token }: UpdateProjectArgs) => {
     const decoded = verifyToken(token) as MyJwtPayload;

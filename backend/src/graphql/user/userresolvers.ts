@@ -1,9 +1,9 @@
 
-import { createUser,findUserByEmail } from "../../models/userModel";
+import { createUser, findUserByEmail } from "../../models/userModel";
 import pool from "../../db"; // for user_devices and password_resets table
 import bcrypt from "bcrypt";
 import crypto from "crypto";
-import { generateToken,verifyToken } from "../../auth/jwt";
+import { generateToken, verifyToken } from "../../auth/jwt";
 import { requireAdmin } from "../../middleware/requireAdmin";
 import { logSecurity } from "../../utils/logger";
 import { signupRateLimiter } from "../../middleware/rateLimiter";
@@ -13,54 +13,54 @@ const resolvers = {
   // ------------------- Signup -------------------
 
   signup: async (
-  { name, email, password }: { name: string; email: string; password: string },
-  req: any
-) => {
-   const ip = req.ip || "unknown";
+    { name, email, password }: { name: string; email: string; password: string },
+    req: any
+  ) => {
+    const ip = req.ip || "unknown";
 
-  // ✅ Rate limit check
-  try {
-    signupRateLimiter(ip);
-  } catch (err) {
-    await logSecurity(null, ip, "SIGNUP_RATE_LIMIT_TRIGGERED", { email });
-    throw err; // GraphQL will return this as an error
-  }
-  const existingUser = await findUserByEmail(email);
-  if (existingUser) throw new Error("User already exists");
+    // ✅ Rate limit check
+    try {
+      signupRateLimiter(ip);
+    } catch (err) {
+      await logSecurity(null, ip, "SIGNUP_RATE_LIMIT_TRIGGERED", { email });
+      throw err; // GraphQL will return this as an error
+    }
+    const existingUser = await findUserByEmail(email);
+    if (existingUser) throw new Error("User already exists");
 
-  const user = await createUser({ name, email, password });
+    const user = await createUser({ name, email, password });
 
-  const accessToken = generateToken(user.id);  // short-lived
-  const refreshToken = generateToken(user.id); // long-lived
+    const accessToken = generateToken(user.id);  // short-lived
+    const refreshToken = generateToken(user.id); // long-lived
 
-  await pool.query(
-    `INSERT INTO user_devices 
+    await pool.query(
+      `INSERT INTO user_devices 
       (user_id, refresh_token, ip_address, user_agent, login_time, is_revoked)
      VALUES ($1, $2, $3, $4, NOW(), FALSE)`,
-    [user.id, refreshToken, req.ip, req.headers["user-agent"] || ""]
-  );
+      [user.id, refreshToken, req.ip, req.headers["user-agent"] || ""]
+    );
 
-  // --- NEW: Convert pending invitations to memberships ---
-  const { rows: invitations } = await pool.query(
-    "SELECT * FROM workspace_invitations WHERE email=$1 AND status='PENDING'",
-    [email]
-  );
+    // --- NEW: Convert pending invitations to memberships ---
+    const { rows: invitations } = await pool.query(
+      "SELECT * FROM workspace_invitations WHERE email=$1 AND status='PENDING'",
+      [email]
+    );
 
-  for (const inv of invitations) {
-    await pool.query(
-      `INSERT INTO workspace_members (workspace_id, user_id, role, joined_at)
+    for (const inv of invitations) {
+      await pool.query(
+        `INSERT INTO workspace_members (workspace_id, user_id, role, joined_at)
        VALUES ($1, $2, $3, NOW())`,
-      [inv.workspace_id, user.id, inv.role]
-    );
+        [inv.workspace_id, user.id, inv.role]
+      );
 
-    await pool.query(
-      "UPDATE workspace_invitations SET status='ACCEPTED' WHERE id=$1",
-      [inv.id]
-    );
-  }
+      await pool.query(
+        "UPDATE workspace_invitations SET status='ACCEPTED' WHERE id=$1",
+        [inv.id]
+      );
+    }
 
-  return { token: accessToken, refreshToken, user };
-},
+    return { token: accessToken, refreshToken, user };
+  },
 
 
 
@@ -87,30 +87,40 @@ const resolvers = {
   },
 
   // ------------------- Update Password -------------------
-  updatePassword: async ({ token, newPassword }: { token: string; newPassword: string }) => {
-    // Verify token exists and not used
-    const result = await pool.query(
-      `SELECT * FROM password_resets WHERE reset_token=$1 AND used=FALSE`,
-      [token]
-    );
-    const reset = result.rows[0];
-    if (!reset) throw new Error("Invalid or used token");
-    if (new Date(reset.expires_at) < new Date()) throw new Error("Token expired");
+  updatePassword: async ({
+    token,
+    newPassword,
+  }: {
+    token: string;
+    newPassword: string;
+  }) => {
+    if (!token) throw new Error("Authentication token is required");
+    if (!newPassword || newPassword.trim() === "")
+      throw new Error("New password is required");
 
-    // Hash new password
-    const hashedPassword = await bcrypt.hash(newPassword, 10);
+    try {
+      // Decode JWT to get user ID
+      const decoded: any = verifyToken(token);
 
-    // Update user's password
-    await pool.query(
-      `UPDATE users SET password=$1 WHERE id=$2`,
-      [hashedPassword, reset.user_id]
-    );
+      const userId = decoded.userId;
+      if (!userId) throw new Error("Invalid token: no user ID found");
 
-    // Mark token as used
-    await pool.query(`UPDATE password_resets SET used=TRUE WHERE id=$1`, [reset.id]);
+      // Hash the new password
+      const hashedPassword = await bcrypt.hash(newPassword, 10);
 
-    return "Password updated successfully!";
+      // Update user's password in DB
+      await pool.query(`UPDATE users SET password=$1 WHERE id=$2`, [
+        hashedPassword,
+        userId,
+      ]);
+
+      return "Password updated successfully!";
+    } catch (err: any) {
+      if (err.name === "TokenExpiredError") throw new Error("Token expired");
+      throw new Error(err.message || "Failed to update password");
+    }
   }
+
 };
 
 const isAdmin = async (token: string) => {

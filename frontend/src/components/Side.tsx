@@ -83,6 +83,11 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
   const [userName, setUserName] = useState("");
   const [showLogoutMenu, setShowLogoutMenu] = useState(false);
 
+  // Password update modal
+  const [showUpdateModal, setShowUpdateModal] = useState(false);
+  const [resetToken, setResetToken] = useState("");
+  const [newPassword, setNewPassword] = useState("");
+
   // Fetch logged-in user info
   useEffect(() => {
     const fetchUser = async () => {
@@ -103,7 +108,7 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
         });
         if (res.data.errors) throw new Error(res.data.errors[0].message);
         const user = res.data.data.getUserProfile;
-        setUserName(user.name.split(" ")[0]); // first name only
+        setUserName(user.name.split(" ")[0]);
       } catch {
         setUserName("User");
       }
@@ -147,7 +152,6 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
   // ------------------- Logout -------------------
   const handleLogout = async () => {
     const refreshToken = localStorage.getItem("refreshToken");
-    console.log(refreshToken)
     try {
       await axios.post("http://localhost:4000/api/auth/logout", { refreshToken });
       localStorage.removeItem("token");
@@ -158,6 +162,38 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
       toast.error("Failed to logout");
     }
   };
+
+  // ------------------- Update Password -------------------
+  // ------------------- Update Password -------------------
+  const handleUpdatePassword = async () => {
+    const token = localStorage.getItem("token");
+    console.log(token) // get token from localStorage
+    if (!token) return toast.error("Reset token not found. Please request a password reset first.");
+    if (!newPassword.trim()) return toast.error("New password is required");
+
+    try {
+      const mutation = `
+      mutation UpdatePassword($token: String!, $newPassword: String!) {
+        updatePassword(token: $token, newPassword: $newPassword)
+      }
+    `;
+      const variables = { token, newPassword };
+
+      const res = await axios.post("http://localhost:4000/graphql", { query: mutation, variables }, {
+        headers: { "Content-Type": "application/json" }
+      });
+
+      if (res.data.errors) throw new Error(res.data.errors[0].message);
+
+      toast.success(res.data.data.updatePassword);
+      setNewPassword("");
+      setShowUpdateModal(false);
+      localStorage.removeItem("resetToken"); // remove token after success
+    } catch (err: any) {
+      toast.error(err.message || "Failed to update password");
+    }
+  };
+
 
   return (
     <aside className="w-64 bg-[#0f172a] border-r border-gray-800 flex flex-col">
@@ -197,12 +233,18 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
             onClick={() => setShowLogoutMenu(!showLogoutMenu)}
           />
           {showLogoutMenu && (
-            <div className="absolute right-0 bottom-10 bg-gray-800 rounded-md shadow-lg w-32 py-2">
+            <div className="absolute right-0 bottom-10 bg-gray-800 rounded-md shadow-lg w-36 py-2 flex flex-col">
               <button
                 onClick={handleLogout}
                 className="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700"
               >
                 Logout
+              </button>
+              <button
+                onClick={() => setShowUpdateModal(true)}
+                className="block w-full text-left px-4 py-2 text-sm text-gray-200 hover:bg-gray-700"
+              >
+                Update Password
               </button>
             </div>
           )}
@@ -238,6 +280,38 @@ const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
           </div>
         </div>
       )}
+
+      {/* Modal for Update Password */}
+      {/* Modal for Update Password */}
+      {showUpdateModal && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
+          <div className="bg-gray-900 p-6 rounded-lg w-80">
+            <h2 className="text-lg font-semibold mb-4 text-gray-200">Update Password</h2>
+            <input
+              type="password"
+              placeholder="New Password"
+              value={newPassword}
+              onChange={(e) => setNewPassword(e.target.value)}
+              className="w-full p-2 rounded mb-4 bg-gray-800 text-gray-200 focus:outline-none"
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                onClick={() => setShowUpdateModal(false)}
+                className="px-4 py-2 bg-gray-700 rounded hover:bg-gray-600"
+              >
+                Cancel
+              </button>
+              <button
+                onClick={handleUpdatePassword}
+                className="px-4 py-2 bg-indigo-600 rounded hover:bg-indigo-500"
+              >
+                Update
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
     </aside>
   );
 };

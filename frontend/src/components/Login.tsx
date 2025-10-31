@@ -20,9 +20,9 @@ const Login = () => {
 
       if (res.status !== 200) throw new Error(res.data.message || "Login failed");
 
-      const { accessToken,refreshToken } = res.data;
-      localStorage.setItem("token", accessToken,);
-      localStorage.setItem("refreshToken",refreshToken); 
+      const { accessToken, refreshToken } = res.data;
+      localStorage.setItem("token", accessToken);
+      localStorage.setItem("refreshToken", refreshToken);
 
       toast.success("Login successful! Redirecting...");
       setTimeout(() => navigate("/home"), 1500);
@@ -48,19 +48,17 @@ const Login = () => {
               required
               className="w-full bg-gray-800 p-3 rounded-lg ring-2 ring-indigo-800 focus:ring-indigo-600 focus:outline-none transition"
             />
-
           </div>
           <div>
             <label className="block text-sm mb-1">Password</label>
             <input
-              type="text"
+              type="password"
               name="password"
               value={form.password}
               onChange={handleChange}
               required
               className="w-full bg-gray-800 p-3 rounded-lg ring-2 ring-indigo-800 focus:ring-indigo-600 focus:outline-none transition"
             />
-
           </div>
           <button
             type="submit"
@@ -69,6 +67,12 @@ const Login = () => {
             Login
           </button>
         </form>
+
+        {/* Forgot Password Link */}
+        <p className="text-sm text-right mt-2 text-indigo-400 hover:underline cursor-pointer" onClick={() => navigate("/forgot-password")}>
+          Forgot password?
+        </p>
+
         <p className="text-sm text-center mt-4 text-gray-400">
           Don’t have an account?{" "}
           <Link to="/signup" className="text-indigo-400 hover:underline">

@@ -73,60 +73,57 @@ const useWorkspaces = () => {
   return { workspaces, setWorkspaces, loading, error };
 };
 
+interface SidebarProps {
+  onSelectWorkspace: (workspaceId: number) => void;
+}
 
-// ------------------- Main Sidebar Component -------------------
-const Sidebar = () => {
+const Sidebar = ({ onSelectWorkspace }: SidebarProps) => {
   const { workspaces, setWorkspaces, loading, error } = useWorkspaces();
   const [showModal, setShowModal] = useState(false);
   const [workspaceName, setWorkspaceName] = useState("");
 
   const createWorkspace = async () => {
-  if (!workspaceName.trim()) return toast.error("Workspace name required");
+    if (!workspaceName.trim()) return toast.error("Workspace name required");
+    const token = localStorage.getItem("token");
+    if (!token) return toast.error("Token not found. Please login.");
 
-  const token = localStorage.getItem("token");
-  if (!token) return toast.error("Token not found. Please login.");
-
-  try {
-    const mutation = `
-      mutation {
-        createWorkspace(name: "${workspaceName}", token: "${token}") {
-          id
-          name
-          createdBy
-          createdAt
-          members { userId role joinedAt }
+    try {
+      const mutation = `
+        mutation {
+          createWorkspace(name: "${workspaceName}", token: "${token}") {
+            id
+            name
+            createdBy
+            createdAt
+            members { userId role joinedAt }
+          }
         }
-      }
-    `;
+      `;
+      const res = await axios.post("http://localhost:4000/graphql", { query: mutation }, {
+        headers: { "Content-Type": "application/json" }
+      });
 
-    const res = await axios.post(
-      "http://localhost:4000/graphql",
-      { query: mutation },
-      { headers: { "Content-Type": "application/json" } }
-    );
+      if (res.data.errors) throw new Error(res.data.errors[0].message);
 
-    if (res.data.errors) throw new Error(res.data.errors[0].message);
-
-    setWorkspaces((prev) => [...prev, res.data.data.createWorkspace]);
-    toast.success("Workspace created!");
-    setWorkspaceName("");
-    setShowModal(false);
-  } catch (err: any) {
-    toast.error(err.message || "Failed to create workspace");
-  }
-};
-
+      setWorkspaces(prev => [...prev, res.data.data.createWorkspace]);
+      toast.success("Workspace created!");
+      setWorkspaceName("");
+      setShowModal(false);
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create workspace");
+    }
+  };
 
   return (
     <aside className="w-64 bg-[#0f172a] border-r border-gray-800 flex flex-col">
       <div className="p-4 font-semibold text-lg">Workspace</div>
-
       <div className="flex-1 overflow-y-auto px-3">
         {loading && <p className="text-gray-400">Loading...</p>}
         {error && <p className="text-red-500">{error}</p>}
         {workspaces.map((w) => (
           <div
             key={w.id}
+            onClick={() => onSelectWorkspace(w.id)}
             className="flex items-center gap-2 px-3 py-2 hover:bg-gray-800 rounded-lg cursor-pointer"
           >
             <FolderIcon className="w-5 h-5 text-gray-400" />
@@ -173,5 +170,4 @@ const Sidebar = () => {
     </aside>
   );
 };
-
 export default Sidebar;

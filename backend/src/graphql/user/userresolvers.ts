@@ -1,5 +1,5 @@
 import { createUser, findUserByEmail } from "../../models/userModel";
-import type { User } from "../../models/userModel";
+
 import pool from "../../db"; // for user_devices and password_resets table
 import bcrypt from "bcrypt";
 import crypto from "crypto";

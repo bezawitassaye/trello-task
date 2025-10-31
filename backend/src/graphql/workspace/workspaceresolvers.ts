@@ -181,6 +181,44 @@ export const workspaceResolvers = {
       members: mems.rows.map((r: any) => ({ userId: r.user_id, role: r.role, joinedAt: r.joined_at }))
     };
   },
+  // ------------------- Get workspaces for a user -------------------
+getUserWorkspaces: async ({ token }: { token: string }) => {
+  // Decode token to get userId
+  const userId = getUserIdFromToken(token);
+
+  // Fetch workspaces where the user is a member
+  const wsRes = await pool.query(
+    `SELECT w.id, w.name, w.created_by, w.created_at, wm.role, wm.joined_at
+     FROM workspaces w
+     JOIN workspace_members wm ON w.id = wm.workspace_id
+     WHERE wm.user_id = $1
+     ORDER BY w.id ASC`,
+    [userId]
+  );
+
+  // Group members by workspace
+  const workspacesMap: { [key: number]: any } = {};
+  for (const row of wsRes.rows) {
+    if (!workspacesMap[row.id]) {
+      workspacesMap[row.id] = {
+        id: row.id,
+        name: row.name,
+        createdBy: row.created_by,
+        createdAt: row.created_at,
+        members: [],
+      };
+    }
+    workspacesMap[row.id].members.push({
+      userId: row.user_id,
+      role: row.role,
+      joinedAt: row.joined_at,
+    });
+  }
+
+  // Return as array
+  return Object.values(workspacesMap);
+},
+
 
   getAllWorkspaces: async ({ adminToken }: any) => {
     // reuse your requireAdmin middleware (or isAdmin)

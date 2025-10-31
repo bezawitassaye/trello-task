@@ -2,39 +2,35 @@ import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
 import axios from "axios";
 import { toast } from "react-toastify";
+
 const Login = () => {
-    const navigate = useNavigate();
+  const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
   const [error, setError] = useState("");
 
-  const handleChange = (e) =>
+  const handleChange = (e: React.ChangeEvent<HTMLInputElement>) =>
     setForm({ ...form, [e.target.name]: e.target.value });
 
-  const handleSubmit = async (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError("");
 
     try {
       const res = await axios.post("http://localhost:4000/api/auth/login", form);
 
-      if (res.status !== 200) {
-        setError(res.data.message || "Login failed");
-        toast.error(res.data.message || "Login failed");
-        return;
-      }
+      if (res.status !== 200) throw new Error(res.data.message || "Login failed");
 
       const { accessToken } = res.data;
-      localStorage.setItem("token", accessToken);
+      localStorage.setItem("token", accessToken); // store token
 
       toast.success("Login successful! Redirecting...");
-      setTimeout(() => navigate("/home"), 1500); // redirect after 1.5s
-    } catch (err) {
-      setError("Login failed. Please check your credentials.");
-      toast.error("Login failed. Please check your credentials.");
+      setTimeout(() => navigate("/home"), 1500);
+    } catch (err: any) {
+      setError(err.message || "Login failed. Check your credentials.");
+      toast.error(err.message || "Login failed. Check your credentials.");
       console.error(err);
     }
   };
-
 
   return (
     <div className="flex h-screen items-center justify-center bg-[#111827] text-gray-200">
@@ -44,33 +40,34 @@ const Login = () => {
           <div>
             <label className="block text-sm mb-1">Email</label>
             <input
-              type="email"
+              type="text"
               name="email"
               value={form.email}
               onChange={handleChange}
               required
               className="w-full bg-gray-800 p-3 rounded-lg ring-2 ring-indigo-800 focus:ring-indigo-600 focus:outline-none transition"
             />
+
           </div>
           <div>
             <label className="block text-sm mb-1">Password</label>
             <input
-              type="password"
+              type="text"
               name="password"
               value={form.password}
               onChange={handleChange}
               required
               className="w-full bg-gray-800 p-3 rounded-lg ring-2 ring-indigo-800 focus:ring-indigo-600 focus:outline-none transition"
             />
+
           </div>
           <button
             type="submit"
-            className="w-full bg-indigo-600 py-2 rounded-lg hover:bg-indigo-500 transition"
+            className="w-full bg-indigo-600 py-2 rounded-lg hover:bg-indigo-500"
           >
             Login
           </button>
         </form>
-
         <p className="text-sm text-center mt-4 text-gray-400">
           Don’t have an account?{" "}
           <Link to="/signup" className="text-indigo-400 hover:underline">

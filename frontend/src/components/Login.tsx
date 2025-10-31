@@ -1,18 +1,40 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
-
+import axios from "axios";
+import { toast } from "react-toastify";
 const Login = () => {
-  const navigate = useNavigate();
+    const navigate = useNavigate();
   const [form, setForm] = useState({ email: "", password: "" });
+  const [error, setError] = useState("");
 
   const handleChange = (e) =>
     setForm({ ...form, [e.target.name]: e.target.value });
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
-    // In real app: authenticate user here
-    navigate("/dashboard");
+    setError("");
+
+    try {
+      const res = await axios.post("http://localhost:4000/api/auth/login", form);
+
+      if (res.status !== 200) {
+        setError(res.data.message || "Login failed");
+        toast.error(res.data.message || "Login failed");
+        return;
+      }
+
+      const { accessToken } = res.data;
+      localStorage.setItem("token", accessToken);
+
+      toast.success("Login successful! Redirecting...");
+      setTimeout(() => navigate("/home"), 1500); // redirect after 1.5s
+    } catch (err) {
+      setError("Login failed. Please check your credentials.");
+      toast.error("Login failed. Please check your credentials.");
+      console.error(err);
+    }
   };
+
 
   return (
     <div className="flex h-screen items-center justify-center bg-[#111827] text-gray-200">

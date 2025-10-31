@@ -1,22 +1,60 @@
 import { Link, useNavigate } from "react-router-dom";
 import { useState } from "react";
-
+import axios from "axios";
+import { toast } from "react-toastify";
 const Signup = () => {
   const navigate = useNavigate();
-  const [form, setForm] = useState({
-    name: "",
-    email: "",
-    password: "",
-  });
+  const [form, setForm] = useState({ name: "", email: "", password: "" });
+  const [error, setError] = useState("");
 
   const handleChange = (e) =>
     setForm({ ...form, [e.target.name]: e.target.value });
-
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    // In real app: register user here
-    navigate("/dashboard");
+    setError("");
+
+    try {
+      const query = `
+      mutation Signup($name: String!, $email: String!, $password: String!) {
+        signup(name: $name, email: $email, password: $password) {
+          token
+          user {
+            id
+            name
+            email
+          }
+        }
+      }
+    `;
+
+      const variables = {
+        name: form.name,
+        email: form.email,
+        password: form.password
+      };
+
+      const res = await axios.post(
+        "http://localhost:4000/graphql",
+        JSON.stringify({ query, variables }),
+        { headers: { "Content-Type": "application/json" } }
+      );
+
+      if (res.data.errors) {
+        throw new Error(res.data.errors[0].message);
+      }
+
+      const { token } = res.data.data.signup;
+      localStorage.setItem("token", token);
+
+      toast.success("Signup successful! Redirecting...");
+      navigate("/home"); // redirect to dashboard
+    } catch (err: any) {
+      setError(err.message || "Signup failed. Please try again.");
+      toast.error(err.message || "Signup failed. Please try again.");
+      console.error(err);
+    }
   };
+
 
   return (
     <div className="flex h-screen items-center justify-center bg-[#111827] text-gray-200">

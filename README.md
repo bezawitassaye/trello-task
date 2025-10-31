@@ -6,7 +6,7 @@ run cd backend
 run ### bun install
 
 
-@@@@@@@ USER @@@@@@@@@@@@@@@@@@
+ USER 
 
 #goto http://localhost:4000/graphql  
 #for sign up run
@@ -107,8 +107,9 @@ FOR refresh #goto http://localhost:4000/refresh in postman or tunderclient
 
 
 
+ workspace 
 
-@@@@@@@ workspace @@@@@@@@@@@@@@@@@@
+ 
 #goto http://localhost:4000/graphql  
 for create workspace
 
@@ -188,7 +189,11 @@ mutation {
     }
   }
 }
-@@@@@@@ Task @@@@@@@@@@@@@@@@@@
+
+
+Task 
+
+
 for create task 
 mutation {
   createTask(

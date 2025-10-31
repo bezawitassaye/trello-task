@@ -183,41 +183,49 @@ export const workspaceResolvers = {
   },
   // ------------------- Get workspaces for a user -------------------
 getUserWorkspaces: async ({ token }: { token: string }) => {
-  // Decode token to get userId
   const userId = getUserIdFromToken(token);
 
-  // Fetch workspaces where the user is a member
+  // Fetch workspaces where the logged-in user is the creator
   const wsRes = await pool.query(
-    `SELECT w.id, w.name, w.created_by, w.created_at, wm.role, wm.joined_at
-     FROM workspaces w
-     JOIN workspace_members wm ON w.id = wm.workspace_id
-     WHERE wm.user_id = $1
-     ORDER BY w.id ASC`,
+    `SELECT id, name, created_by, created_at
+     FROM workspaces
+     WHERE created_by = $1
+     ORDER BY id ASC`,
     [userId]
   );
 
-  // Group members by workspace
+  // Fetch members for each workspace
   const workspacesMap: { [key: number]: any } = {};
-  for (const row of wsRes.rows) {
-    if (!workspacesMap[row.id]) {
-      workspacesMap[row.id] = {
-        id: row.id,
-        name: row.name,
-        createdBy: row.created_by,
-        createdAt: row.created_at,
-        members: [],
-      };
-    }
-    workspacesMap[row.id].members.push({
-      userId: row.user_id,
-      role: row.role,
-      joinedAt: row.joined_at,
-    });
+  for (const ws of wsRes.rows) {
+    workspacesMap[ws.id] = {
+      id: ws.id,
+      name: ws.name,
+      createdBy: ws.created_by,
+      createdAt: ws.created_at,
+      members: []
+    };
   }
 
-  // Return as array
+  const memRes = await pool.query(
+    `SELECT workspace_id, user_id, role, joined_at
+     FROM workspace_members
+     WHERE workspace_id = ANY($1::int[])`,
+    [wsRes.rows.map(r => r.id)]
+  );
+
+  for (const m of memRes.rows) {
+    if (workspacesMap[m.workspace_id]) {
+      workspacesMap[m.workspace_id].members.push({
+        userId: m.user_id,
+        role: m.role,
+        joinedAt: m.joined_at
+      });
+    }
+  }
+
   return Object.values(workspacesMap);
-},
+}
+,
 
 
   getAllWorkspaces: async ({ adminToken }: any) => {

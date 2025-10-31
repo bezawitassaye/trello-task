@@ -35,17 +35,22 @@ const useWorkspaces = () => {
 
       try {
         const query = `
-          query GetAllWorkspaces($adminToken: String!) {
-            getAllWorkspaces(adminToken: $adminToken) {
-              id
-              name
-              createdBy
-              createdAt
-              members { userId role joinedAt }
-            }
+      query GetUserWorkspaces($token: String!) {
+        getUserWorkspaces(token: $token) {
+          id
+          name
+          createdBy
+          createdAt
+          members {
+            userId
+            role
+            joinedAt
           }
-        `;
-        const variables = { adminToken: token };
+        }
+      }
+    `;;
+
+        const variables = { token };
         const res = await axios.post(
           "http://localhost:4000/graphql",
           { query, variables },
@@ -54,7 +59,7 @@ const useWorkspaces = () => {
 
         if (res.data.errors) throw new Error(res.data.errors[0].message);
 
-        setWorkspaces(res.data.data.getAllWorkspaces);
+        setWorkspaces(res.data.data.getUserWorkspaces);
       } catch (err: any) {
         setError(err.message || "Failed to fetch workspaces");
       } finally {
@@ -67,6 +72,7 @@ const useWorkspaces = () => {
 
   return { workspaces, setWorkspaces, loading, error };
 };
+
 
 // ------------------- Main Sidebar Component -------------------
 const Sidebar = () => {

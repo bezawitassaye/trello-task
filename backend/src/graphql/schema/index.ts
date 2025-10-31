@@ -76,7 +76,9 @@ const schema = buildSchema(`
     getWorkspace(workspaceId: ID!, token: String!): Workspace
     getAllWorkspaces(adminToken: String!): [Workspace!]!
     summarizeTask(taskId: Int!): String
+    getUserWorkspaces(token: String!): [Workspace!]!
   }
+    
 
   # --- Mutations ---
   type Mutation {

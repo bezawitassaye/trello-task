@@ -1,23 +1,24 @@
 import { useState, useEffect } from "react";
 import Sidebar from "./components/Side";
-import BoardColumn from "./components/Maincolumn";
 import axios from "axios";
 import { toast } from "react-toastify";
 
 const Home = () => {
   const [selectedWorkspaceId, setSelectedWorkspaceId] = useState<number | null>(null);
   const [workspace, setWorkspace] = useState<any>(null);
-  const [tasks, setTasks] = useState<any[]>([]); // Replace with API tasks if available
+  const [projects, setProjects] = useState<any[]>([]);
 
-  // Fetch workspace when selected
+  // Fetch workspace and projects when selected
   useEffect(() => {
     if (!selectedWorkspaceId) return;
-    const fetchWorkspace = async () => {
-      const token = localStorage.getItem("token");
-      if (!token) return toast.error("Token not found");
 
+    const token = localStorage.getItem("token");
+    if (!token) return toast.error("Token not found");
+
+    const fetchWorkspaceAndProjects = async () => {
       try {
-        const query = `
+        // Workspace info
+        const workspaceQuery = `
           query {
             getWorkspace(workspaceId: ${selectedWorkspaceId}, token: "${token}") {
               id
@@ -28,17 +29,34 @@ const Home = () => {
             }
           }
         `;
-        const res = await axios.post("http://localhost:4000/graphql", { query });
-        if (res.data.errors) throw new Error(res.data.errors[0].message);
-        setWorkspace(res.data.data.getWorkspace);
+        const wsRes = await axios.post("http://localhost:4000/graphql", { query: workspaceQuery });
+        if (wsRes.data.errors) throw new Error(wsRes.data.errors[0].message);
+        setWorkspace(wsRes.data.data.getWorkspace);
+
+        // Projects
+        const projectsQuery = `
+          query {
+            getProjectsByWorkspace(workspaceId: ${selectedWorkspaceId}) {
+              id
+              name
+              createdBy
+              createdAt
+              members { userId role joinedAt }
+            }
+          }
+        `;
+        const prRes = await axios.post("http://localhost:4000/graphql", { query: projectsQuery });
+        if (prRes.data.errors) throw new Error(prRes.data.errors[0].message);
+        setProjects(prRes.data.data.getProjectsByWorkspace);
       } catch (err: any) {
-        toast.error(err.message || "Failed to fetch workspace");
+        toast.error(err.message || "Failed to fetch workspace/projects");
       }
     };
-    fetchWorkspace();
+
+    fetchWorkspaceAndProjects();
   }, [selectedWorkspaceId]);
 
-  // Invite a new member
+  // Invite a member
   const inviteMember = async (email: string) => {
     if (!workspace) return;
     const token = localStorage.getItem("token");
@@ -86,7 +104,7 @@ const Home = () => {
     }
   };
 
-  // Update a member's role
+  // Update a member role
   const updateMemberRole = async (userId: number, role: "MEMBER" | "VIEWER") => {
     if (!workspace) return;
     const token = localStorage.getItem("token");
@@ -110,6 +128,37 @@ const Home = () => {
     }
   };
 
+  // Create project
+  const createProject = async () => {
+    if (!workspace) return;
+    const name = prompt("Enter project name");
+    if (!name) return;
+
+    const token = localStorage.getItem("token");
+    if (!token) return toast.error("Token not found");
+
+    try {
+      const mutation = `
+        mutation {
+          createProject(workspaceId: ${workspace.id}, name: "${name}", token: "${token}") {
+            id
+            name
+            createdBy
+            createdAt
+            members { userId role joinedAt }
+          }
+        }
+      `;
+      const res = await axios.post("http://localhost:4000/graphql", { query: mutation });
+      if (res.data.errors) throw new Error(res.data.errors[0].message);
+
+      setProjects(prev => [res.data.data.createProject, ...prev]);
+      toast.success("Project created!");
+    } catch (err: any) {
+      toast.error(err.message || "Failed to create project");
+    }
+  };
+
   return (
     <div className="flex h-screen bg-[#111827] text-gray-200">
       <Sidebar onSelectWorkspace={setSelectedWorkspaceId} />
@@ -127,7 +176,10 @@ const Home = () => {
                 >
                   + Invite Member
                 </button>
-                <button className="bg-blue-600 px-4 py-2 rounded-lg text-sm">
+                <button
+                  className="bg-blue-600 px-4 py-2 rounded-lg text-sm"
+                  onClick={createProject}
+                >
                   + Create Project
                 </button>
               </div>
@@ -163,10 +215,20 @@ const Home = () => {
               ))}
             </div>
 
-            {/* Task Columns */}
-            <div className="flex gap-6 overflow-x-auto">
-              {["To Do", "In Progress", "In Review"].map((col, i) => (
-                <BoardColumn key={i} title={col} tasks={tasks} />
+            {/* Projects */}
+            <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+              {projects.map((project) => (
+                <div key={project.id} className="bg-gray-800 p-4 rounded-lg">
+                  <h2 className="font-semibold mb-2">{project.name}</h2>
+                  <p className="text-sm text-gray-400 mb-2">Created by User {project.createdBy}</p>
+                  <div className="flex flex-wrap gap-2">
+                    {project.members.map((m: any) => (
+                      <span key={m.userId} className="px-2 py-1 bg-gray-700 rounded text-xs">
+                        User {m.userId} ({m.role})
+                      </span>
+                    ))}
+                  </div>
+                </div>
               ))}
             </div>
           </>

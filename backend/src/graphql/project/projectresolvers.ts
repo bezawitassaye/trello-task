@@ -285,6 +285,41 @@ export const projectResolvers = {
     return { success: true, message: `User ${userId} removed from project ${projectId}` };
   },
   // Get all projects for a workspace
+getProjectsByWorkspace: async ({ workspaceId }: { workspaceId: number }) => {
+  // console.log("workspaceId:", workspaceId);
+
+  // Fetch projects for the workspace
+  const { rows: projects } = await pool.query(
+    "SELECT * FROM projects WHERE workspace_id=$1 ORDER BY created_at DESC",
+    [workspaceId]
+  );
+  // console.log("projects rows:", projects);
+
+  const projectsWithMembers = [];
+
+  for (const project of projects) {
+    const { rows: members } = await pool.query(
+      "SELECT user_id, role, joined_at FROM project_members WHERE project_id=$1",
+      [project.id]
+    );
+
+    projectsWithMembers.push({
+      id: project.id,
+      workspaceId: project.workspace_id,
+      name: project.name,
+      createdBy: project.created_by,
+      createdAt: project.created_at,
+      members: members.map((m: any) => ({
+        userId: m.user_id,
+        role: m.role,
+        joinedAt: m.joined_at,
+      })),
+    });
+  }
+
+  return projectsWithMembers;
+}
+
 
 
 };

@@ -284,6 +284,53 @@ export const projectResolvers = {
 
     return { success: true, message: `User ${userId} removed from project ${projectId}` };
   },
+  // Get all projects for a workspace
+getProjectsByWorkspace: async (_: any, { workspaceId, token }: { workspaceId: number; token: string }) => {
+  const decoded = verifyToken(token) as MyJwtPayload;
+
+  // Check if user is part of the workspace
+  const { rows: wm } = await pool.query(
+    "SELECT * FROM workspace_members WHERE workspace_id=$1 AND user_id=$2",
+    [workspaceId, decoded.userId]
+  );
+  if (!wm.length) {
+    await logSecurity(decoded.userId, null, "GET_PROJECTS_FAILED", { workspaceId, reason: "Not a workspace member" });
+    throw new Error("Not a workspace member");
+  }
+
+  // Fetch all projects in the workspace
+  const { rows: projects } = await pool.query(
+    "SELECT * FROM projects WHERE workspace_id=$1 ORDER BY created_at DESC",
+    [workspaceId]
+  );
+
+  // Fetch members for each project
+  const projectsWithMembers = [];
+  for (const project of projects) {
+    const { rows: members } = await pool.query(
+      "SELECT user_id, role, joined_at FROM project_members WHERE project_id=$1",
+      [project.id]
+    );
+
+    projectsWithMembers.push({
+      id: project.id,
+      workspaceId: project.workspace_id,
+      name: project.name,
+      createdBy: project.created_by,
+      createdAt: project.created_at,
+      members: members.map((m: any) => ({
+        userId: m.user_id,
+        role: m.role,
+        joinedAt: m.joined_at,
+      })),
+    });
+  }
+
+  await logInfo(decoded.userId, null, "GET_PROJECTS_SUCCESS", { workspaceId, count: projects.length });
+
+  return projectsWithMembers;
+},
+
 };
 
 export default projectResolvers;

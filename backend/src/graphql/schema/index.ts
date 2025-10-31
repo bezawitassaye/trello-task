@@ -77,6 +77,8 @@ const schema = buildSchema(`
     getAllWorkspaces(adminToken: String!): [Workspace!]!
     summarizeTask(taskId: Int!): String
     getUserWorkspaces(token: String!): [Workspace!]!
+      getProjectsByWorkspace(workspaceId: Int!, token: String!): [Project!]!
+
   }
     
 
